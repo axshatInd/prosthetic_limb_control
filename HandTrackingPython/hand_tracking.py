@@ -3,59 +3,41 @@ import mediapipe as mp
 import socket
 import json
 
-# Initialize MediaPipe Hand Solution
 mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(min_detection_confidence=0.7, min_tracking_confidence=0.5)
-mp_drawing = mp.solutions.drawing_utils
+hands = mp_hands.Hands(
+    static_image_mode=False,
+    max_num_hands=1,
+    min_detection_confidence=0.7,
+    min_tracking_confidence=0.7
+)
 
-# Initialize UDP communication
-UDP_IP = "127.0.0.1"  # Localhost (same machine)
-UDP_PORT = 5005
+UDP_IP = "127.0.0.1"
+UDP_PORT = 6000
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-# Start webcam capture
 cap = cv2.VideoCapture(0)
 
-while True:
+while cap.isOpened():
     success, image = cap.read()
-    if not success:
-        break
-
-    # Flip the image horizontally for a later selfie-view display
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    image.flags.writeable = False
-
-    # Process the image and get hand landmarks
-    results = hands.process(image)
-    image.flags.writeable = True
-    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-
-    # If hands are detected, send selected landmarks via UDP
-    if results.multi_hand_landmarks:
-        for landmarks in results.multi_hand_landmarks:
-            hand_data = {}
-
-            # For example, sending positions of specific bones: wrist, index finger, thumb
-            wrist = landmarks.landmark[mp_hands.HandLandmark.WRIST]
-            index_tip = landmarks.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP]
-            thumb_tip = landmarks.landmark[mp_hands.HandLandmark.THUMB_TIP]
-
-            hand_data['wrist'] = {"x": wrist.x, "y": wrist.y, "z": wrist.z}
-            hand_data['index_finger'] = {"x": index_tip.x, "y": index_tip.y, "z": index_tip.z}
-            hand_data['thumb'] = {"x": thumb_tip.x, "y": thumb_tip.y, "z": thumb_tip.z}
-
-            # Send hand data over UDP
-            data = json.dumps(hand_data)
-            sock.sendto(data.encode(), (UDP_IP, UDP_PORT))
-
-            # Draw landmarks on the frame
-            mp_drawing.draw_landmarks(image, landmarks, mp_hands.HAND_CONNECTIONS)
-
-    # Display the image
-    cv2.imshow("Hand Tracking", image)
+    if not success: continue
     
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    image = cv2.flip(image, 1)
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    results = hands.process(image_rgb)
+    
+    if results.multi_hand_landmarks:
+        hand_landmarks = results.multi_hand_landmarks[0]
+        landmark_list = [{"x": lm.x, "y": lm.y, "z": lm.z} for lm in hand_landmarks.landmark]
+        
+        try:
+            sock.sendto(json.dumps({"landmark": landmark_list}).encode(), (UDP_IP, UDP_PORT))
+        except Exception as e:
+            print(f"Send error: {e}")
+    
+    cv2.imshow("Hand Tracking", image)
+    if cv2.waitKey(5) & 0xFF == ord('q'):
         break
 
 cap.release()
 cv2.destroyAllWindows()
+sock.close()

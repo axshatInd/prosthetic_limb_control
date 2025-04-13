@@ -1,92 +1,136 @@
+using UnityEngine;
 using System;
 using System.Net;
 using System.Net.Sockets;
-using UnityEngine;
-using System.Collections.Generic;
+using System.Text;
+using Newtonsoft.Json;
 
 public class HandTrackingReceiver : MonoBehaviour
 {
+    public int port = 6000;
     private UdpClient udpClient;
-    private int port = 5005; // Set your port number
-    private IPEndPoint ipEndPoint;
 
-    // Serialized fields for bone transforms (to assign in the Inspector)
-    [SerializeField] private Transform wristBone;
-    [SerializeField] private Transform palmBone;
-    [SerializeField] private Transform indexBase;
-    [SerializeField] private Transform indexMid;
-    [SerializeField] private Transform indexTip;
-    [SerializeField] private Transform thumbBase;
-    [SerializeField] private Transform thumbMid;
-    [SerializeField] private Transform thumbTip;
-    [SerializeField] private Transform middleBase;
-    [SerializeField] private Transform middleMid;
-    [SerializeField] private Transform middleTip;
-    [SerializeField] private Transform ringBase;
-    [SerializeField] private Transform ringMid;
-    [SerializeField] private Transform ringTip;
-    [SerializeField] private Transform pinkyBase;
-    [SerializeField] private Transform pinkyMid;
-    [SerializeField] private Transform pinkyTip;
+    // Hand bone references
+    public Transform wrist;
+    public Transform[] thumbJoints;
+    public Transform[] indexJoints;
+    public Transform[] middleJoints;
+    public Transform[] ringJoints;
+    public Transform[] pinkyJoints;
+
+    // Settings
+    public float movementScale = 0.15f;
+    public float rotationSmoothness = 15f;
+
+    [System.Serializable]
+    private class HandData { public Landmark[] landmark; }
+
+    [System.Serializable]
+    private class Landmark { public float x; public float y; public float z; }
+
+    private Landmark[] currentLandmarks;
 
     void Start()
     {
-        // Initialize UDP client and listener
-        udpClient = new UdpClient(port);
-        ipEndPoint = new IPEndPoint(IPAddress.Any, port);
-        udpClient.BeginReceive(new AsyncCallback(ReceiveCallback), null); // Start receiving data
+        InitializeUDP();
     }
 
-    private void ReceiveCallback(IAsyncResult ar)
+    void InitializeUDP()
     {
-        IPEndPoint endPoint = new IPEndPoint(IPAddress.Any, port);
-        byte[] data = udpClient.EndReceive(ar, ref endPoint);
-
-        // Parse the received data (e.g., hand landmarks in JSON format)
-        string receivedMessage = System.Text.Encoding.UTF8.GetString(data);
-        Debug.Log("Received Data: " + receivedMessage);
-
-        // Process the data (map it to hand movement)
-        ProcessReceivedData(receivedMessage);
-
-        // Continue listening for the next packet
-        udpClient.BeginReceive(new AsyncCallback(ReceiveCallback), null);
+        try
+        {
+            udpClient = new UdpClient(port);
+            udpClient.BeginReceive(new AsyncCallback(ReceiveCallback), null);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"UDP Init Error: {e.Message}");
+        }
     }
 
-    private void ProcessReceivedData(string data)
+    private void ReceiveCallback(IAsyncResult result)
     {
-        // Deserialize the JSON data (ensure the structure matches what you are sending)
-        Dictionary<int, Dictionary<string, float>> handData = JsonUtility.FromJson<HandData>(data).handData;
-
-        // Map the hand landmarks to the corresponding bones
-        if (handData.ContainsKey(0)) wristBone.localPosition = new Vector3(handData[0]["x"], handData[0]["y"], handData[0]["z"]);
-        if (handData.ContainsKey(1)) indexBase.localPosition = new Vector3(handData[1]["x"], handData[1]["y"], handData[1]["z"]);
-        if (handData.ContainsKey(2)) indexMid.localPosition = new Vector3(handData[2]["x"], handData[2]["y"], handData[2]["z"]);
-        if (handData.ContainsKey(3)) indexTip.localPosition = new Vector3(handData[3]["x"], handData[3]["y"], handData[3]["z"]);
-        if (handData.ContainsKey(4)) thumbBase.localPosition = new Vector3(handData[4]["x"], handData[4]["y"], handData[4]["z"]);
-        if (handData.ContainsKey(5)) thumbMid.localPosition = new Vector3(handData[5]["x"], handData[5]["y"], handData[5]["z"]);
-        if (handData.ContainsKey(6)) thumbTip.localPosition = new Vector3(handData[6]["x"], handData[6]["y"], handData[6]["z"]);
-        if (handData.ContainsKey(7)) middleBase.localPosition = new Vector3(handData[7]["x"], handData[7]["y"], handData[7]["z"]);
-        if (handData.ContainsKey(8)) middleMid.localPosition = new Vector3(handData[8]["x"], handData[8]["y"], handData[8]["z"]);
-        if (handData.ContainsKey(9)) middleTip.localPosition = new Vector3(handData[9]["x"], handData[9]["y"], handData[9]["z"]);
-        if (handData.ContainsKey(10)) ringBase.localPosition = new Vector3(handData[10]["x"], handData[10]["y"], handData[10]["z"]);
-        if (handData.ContainsKey(11)) ringMid.localPosition = new Vector3(handData[11]["x"], handData[11]["y"], handData[11]["z"]);
-        if (handData.ContainsKey(12)) ringTip.localPosition = new Vector3(handData[12]["x"], handData[12]["y"], handData[12]["z"]);
-        if (handData.ContainsKey(13)) pinkyBase.localPosition = new Vector3(handData[13]["x"], handData[13]["y"], handData[13]["z"]);
-        if (handData.ContainsKey(14)) pinkyMid.localPosition = new Vector3(handData[14]["x"], handData[14]["y"], handData[14]["z"]);
-        if (handData.ContainsKey(15)) pinkyTip.localPosition = new Vector3(handData[15]["x"], handData[15]["y"], handData[15]["z"]);
+        try
+        {
+            IPEndPoint remoteEP = new IPEndPoint(IPAddress.Any, port);
+            byte[] data = udpClient.EndReceive(result, ref remoteEP);
+            ProcessData(data);
+            udpClient.BeginReceive(new AsyncCallback(ReceiveCallback), null);
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"UDP Error: {e.Message}");
+        }
     }
 
-    // Class to deserialize the hand data from JSON
-    [Serializable]
-    public class HandData
+    void ProcessData(byte[] data)
     {
-        public Dictionary<int, Dictionary<string, float>> handData;
+        try
+        {
+            string json = Encoding.UTF8.GetString(data);
+            HandData handData = JsonConvert.DeserializeObject<HandData>(json);
+            currentLandmarks = handData.landmark;
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"Data Error: {e.Message}");
+        }
     }
 
-    void OnApplicationQuit()
+    void Update()
     {
-        // Close UDP connection on exit
-        udpClient.Close();
+        if (currentLandmarks == null || currentLandmarks.Length < 21) return;
+
+        UpdateWrist();
+        UpdateFingers(thumbJoints, 1);
+        UpdateFingers(indexJoints, 5);
+        UpdateFingers(middleJoints, 9);
+        UpdateFingers(ringJoints, 13);
+        UpdateFingers(pinkyJoints, 17);
+    }
+
+    void UpdateWrist()
+    {
+        Vector3 wristPos = ConvertToVector3(currentLandmarks[0]);
+        wrist.position = wristPos * movementScale;
+
+        Vector3 palmForward = (ConvertToVector3(currentLandmarks[9]) - wristPos).normalized;
+        Vector3 palmUp = Vector3.Cross(
+            ConvertToVector3(currentLandmarks[5]) - ConvertToVector3(currentLandmarks[17]),
+            palmForward).normalized;
+
+        Quaternion targetRotation = Quaternion.LookRotation(palmForward, palmUp);
+        wrist.rotation = Quaternion.Slerp(wrist.rotation, targetRotation, Time.deltaTime * rotationSmoothness);
+    }
+
+    void UpdateFingers(Transform[] joints, int startIdx)
+    {
+        for (int i = 0; i < joints.Length; i++)
+        {
+            Vector3 startPos = ConvertToVector3(currentLandmarks[startIdx + i]);
+            Vector3 endPos = ConvertToVector3(currentLandmarks[startIdx + i + 1]);
+            Vector3 direction = (endPos - startPos).normalized;
+
+            Quaternion targetRotation = Quaternion.LookRotation(direction);
+            joints[i].rotation = Quaternion.Slerp(
+                joints[i].rotation, 
+                targetRotation, 
+                Time.deltaTime * rotationSmoothness
+            );
+        }
+    }
+
+    Vector3 ConvertToVector3(Landmark landmark)
+    {
+        return new Vector3(landmark.x, landmark.y, landmark.z);
+    }
+
+    void OnDestroy()
+    {
+        if (udpClient != null)
+        {
+            udpClient.Close();
+            udpClient.Dispose();
+        }
     }
 }
