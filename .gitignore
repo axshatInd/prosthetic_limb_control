@@ -1,5 +1,6 @@
 # Ignore the virtual environment folder
 /venv/
+/HandTrackingPython/venv/
 
 # Ignore build, temporary, and object folders
 /Temp/
