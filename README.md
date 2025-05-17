@@ -12,7 +12,7 @@
 - Ensure all the packages listed in Packages/manifest.json are installed. Unity should automatically resolve these, but you can manually check and install any missing packages.
 
 - Open Command Prompt : You can do this by searching for "cmd" in the Start menu.
-- Navigate to ~~ YOUR CORRESPONDING ~~ Project Directory :
+- Navigate to ~~ (YOUR CORRESPONDING) ~~ Project Directory :
 
 ```bash
 cd c:\Users\aksha\Documents\Projects\prosthetic_limb_control\HandTrackingPython
